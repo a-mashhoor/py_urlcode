@@ -1,0 +1,5 @@
+*.txt
+*.swp
+*.swo
+.tmp/
+.test/
