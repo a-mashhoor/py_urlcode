@@ -1,67 +1,110 @@
 #!/usr/bin/python3
-
 import urllib.parse
 import sys
-import select
 import argparse
 import textwrap
-from typing import Optional, List
-import time
+from typing import Optional, List, NoReturn, Union
 
-
-def main() -> None:
+def main() -> NoReturn:
     """Main function to handle command-line arguments and execute encoding/decoding."""
     args = parse_arguments()
-
     try:
         data = read_input(args.data, args.input_file)
         if not data:
             raise ValueError("Input is empty.")
-
-        if args.url_encode:
-            result = url_encode(data)
-        elif args.url_decode:
-            result = url_decode(data)
-
-        write_output(result, args.output_file)
-
+        results = process_data(data, args.url_encode, args.encoding, args.verbose)
+        write_output(results, args.output_file, args.verbose)
     except Exception as e:
         print(e)
         sys.exit(1)
 
 
-def parse_arguments() -> argparse.Namespace:
-    """Parse and validate command-line arguments."""
-    class CustomParser(argparse.ArgumentParser):
-        def error(self, message: str) -> None:
-            """Override default error behavior to display help on errors."""
-            sys.stderr.write(f"Error: {message}\n\n")
-            self.print_help()
-            sys.exit(2)
+def read_input(data: Optional[str], input_file: Optional[str]) -> str:
+    """Read input from stdin, command-line argument, or file."""
+    if input_file:
+        with open(input_file, "r", encoding='utf-8') as file:
+            return '\n'.join(line.strip() for line in file if line.strip())
+    elif not sys.stdin.isatty():
+        return '\n'.join(line.strip() for line in sys.stdin if line.strip())
+    elif data:
+        if len(data) == 1:
+            return data[0].strip()
+        elif len(data) > 1:
+            data = [d for d in data if d]
+            return data
+        else: return ""
+    else: return ""
 
+
+def process_data(data: Union[str, list], encode: bool, encoding: str, verbose:
+                 bool) -> Union[str, list]:
+    """Process each line of data for encoding or decoding."""
+
+    def data_processor(data: str, encode: bool, encoding: str, verbose: bool) -> str:
+        processed_lines = []
+        for index, line in enumerate(data.splitlines()):
+            try:
+                if encode:
+                    result = urllib.parse.quote(line.encode(encoding))
+                else:
+                    result = urllib.parse.unquote_to_bytes(line).decode(encoding)
+                processed_lines.append(result)
+                if verbose:
+                    print(f"Processed line {index + 1}: {result}")
+            except Exception as e:
+                raise ValueError(f"Failed to process line {index + 1}: {e}")
+        return '\n'.join(processed_lines)
+
+    if isinstance(data, str):
+        return data_processor(data, encode, encoding, verbose)
+
+    elif isinstance(data, list):
+        result_list = []
+        for d in data:
+            result_list.append(data_processor(d, encode, encoding, verbose))
+        result_list = ['\n'.join(result_list)]
+        return result_list
+
+
+
+def write_output(output: str, output_file: Optional[str], verbose: bool) -> None:
+    """Write output to stdout or file."""
+    if verbose:
+        print("Writing output...")
+    if output_file:
+        with open(output_file, "w", encoding='utf-8') as file:
+            if not isinstance(output, list):
+                file.write(output)
+            else:
+                for item in output:
+                    file.write(item)
+    else:
+        print(output) if not isinstance(output, list) else print(*output)
+
+
+def parse_arguments():
+    """Parse and validate command-line arguments."""
     description = textwrap.dedent("""
         \033[1;31mThis tool is developed by Arshia Mashhoor
         under MIT Open source LICENSE for educational usage only.\033[0m
     """)
-
     epilog = textwrap.dedent(f"""
         {'About':-^100}
         Author: Arshia Mashhoor
         Github: https://github.com/a-mashhoor/py_urlencoder
     """)
 
-    parser = CustomParser(
+    parser = argparse.ArgumentParser(
         formatter_class=argparse.RawTextHelpFormatter,
         prog="py_urlencoder",
         description=description,
         epilog=epilog,
         add_help=True
     )
-
     # Add arguments
     parser.add_argument(
         "-d", "--data",
-        nargs="?",
+        nargs="*",
         help="Data to be encoded or decoded."
     )
     parser.add_argument(
@@ -71,6 +114,16 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "-o", "--output-file",
         help="Write output to a file."
+    )
+    parser.add_argument(
+        "-e", "--encoding",
+        default="utf-8",
+        help="Specify the character set encoding (default: utf-8)."
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Enable verbose mode for detailed logs."
     )
     encoding_group = parser.add_mutually_exclusive_group(required=True)
     encoding_group.add_argument(
@@ -84,78 +137,18 @@ def parse_arguments() -> argparse.Namespace:
         help="Decode URL-encoded text."
     )
     parser.add_argument(
-        "-v", "--version",
+        "-V", "--version",
         action="version",
         version="%(prog)s 1.0.0"
     )
 
-    # Validate arguments
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         sys.exit(1)
 
     return parser.parse_args()
 
-
-def is_stdin() -> bool:
-    """Check if input is being piped via stdin."""
-    return True if select.select([sys.stdin, ], [], [], 0.0)[0] else False
-
-
-def read_input(data: Optional[str], input_file: Optional[str]) -> str:
-    """Read input from stdin, command-line argument, or file."""
-
-    def reading_file(file):
-        out=""
-        for line in file.read().split():
-            if line != "\n":
-                out+=line+" "
-        return out
-
-    if input_file:
-        with open(input_file, "r") as f:
-            return reading_file(f)
-    elif is_stdin():
-        return reading_file(sys.stdin)
-    return data.strip() if data else ""
-
-
-def write_output(output: str, output_file: Optional[str]) -> None:
-    """Write output to stdout or file."""
-    if output_file:
-        with open(output_file, "w") as f:
-            f.write(output)
-    else:
-        print(output)
-
-
-def url_encode(data: str) -> str:
-    """Encode a string to URL-encoded format."""
-    try:
-        return urllib.parse.quote(data)
-    except Exception as e:
-        raise ValueError(f"Failed to encode input: {e}")
-
-
-def url_decode(data: str) -> str:
-    """Decode a URL-encoded string."""
-    try:
-        return urllib.parse.unquote(data)
-    except Exception as e:
-        raise ValueError(f"Failed to decode input: {e}")
-
-
-def process_batch(inputs: List[str], encode: bool) -> List[str]:
-    """Process a list of inputs for encoding or decoding."""
-    results = []
-    for input_data in inputs:
-        if encode:
-            results.append(url_encode(input_data))
-        else:
-            results.append(url_decode(input_data))
-    return results
-
-
+# the main driver (entry point!)
 if __name__ == "__main__":
     try:
         main()
